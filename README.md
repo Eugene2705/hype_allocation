@@ -15,6 +15,19 @@ import gurobipy as gp
 
 from allocation_model import AllocationData, build_allocation_model
 
+## Quick start
+
+```python
+import gurobipy as gp
+import pandas as pd
+
+from allocation_model import (
+    AllocationData,
+    allocation_data_from_tables,
+    build_allocation_model,
+)
+
+# Toy inputs (replace with your data sources)
 data = AllocationData(
     doors=["D1", "D2"],
     sizes=["S", "M"],
@@ -61,6 +74,43 @@ writing two CSVs:
 
 * ``<output-prefix>_allocations.csv`` — door/SKU runs, ratios, score, and heat
 * ``<output-prefix>_slacks.csv`` — constraint slacks to explain bottlenecks
+
+# Stakeholder-friendly table
+rows = allocation.summarize_allocations()
+for row in rows:
+    print(row)
+
+# Constraint slack report (useful for explaining bottlenecks)
+slacks = allocation.constraint_slacks()
+```
+
+## Loading data tables
+
+If your inputs live in CSV/Excel, read them with pandas and turn them into an
+``AllocationData`` in one step:
+
+```python
+score = pd.read_csv("score.csv")           # columns: door,size,score
+eligibility = pd.read_csv("eligibility.csv")  # columns: door,sku,eligible
+supply = pd.read_csv("supply.csv")         # columns: sku,size,supply,max_runs
+cap_runs = pd.read_csv("cap_runs.csv")     # columns: size,cap_runs
+heat = pd.read_csv("heat.csv")             # columns: sku,heat
+min_runs = pd.read_csv("min_runs.csv")     # optional columns: door,sku,min_runs
+
+data = allocation_data_from_tables(
+    score=score,
+    eligibility=eligibility,
+    supply=supply,
+    cap_runs=cap_runs,
+    heat=heat,
+    min_runs=min_runs,
+)
+
+allocation = build_allocation_model(data)
+allocation.optimize()
+
+print(pd.DataFrame(allocation.summarize_allocations()))
+```
 
 ## Reviewing results
 
