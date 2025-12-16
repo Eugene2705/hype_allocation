@@ -24,22 +24,6 @@ def _read_table(path: Path, *, required: bool = True) -> Optional[pd.DataFrame]:
 
 
 def run(data_dir: Path, output_prefix: Path, use_solution_pool: bool) -> None:
-    doors = _read_table(data_dir / "doors.csv")
-    articles = _read_table(data_dir / "articles.csv")
-    eligibility = _read_table(data_dir / "eligibility.csv")
-    supply = _read_table(data_dir / "supply.csv")
-    heat = _read_table(data_dir / "heat.csv")
-    tier_cap_runs = _read_table(data_dir / "tier_cap_runs.csv")
-    tier_capacity = _read_table(data_dir / "tier_capacity.csv")
-
-    data = allocation_data_from_tables(
-        doors=doors,
-        articles=articles,
-        eligibility=eligibility,
-        supply=supply,
-        heat=heat,
-        tier_cap_runs=tier_cap_runs,
-        tier_capacity=tier_capacity,
     score = _read_table(data_dir / "score.csv")
     eligibility = _read_table(data_dir / "eligibility.csv")
     supply = _read_table(data_dir / "supply.csv")
@@ -81,7 +65,6 @@ def parse_args() -> argparse.Namespace:
         "--data-dir",
         type=Path,
         default=Path("data"),
-        help="Directory containing CSV inputs (doors, articles, eligibility, supply, heat, tier_cap_runs, tier_capacity).",
         help="Directory containing CSV inputs (score, eligibility, supply, cap_runs, heat, optional min_runs).",
     )
     parser.add_argument(
