@@ -1,4 +1,14 @@
+#diff --git a/run_allocation.py b/run_allocation.py
+#new file mode 100644
+#index 0000000000000000000000000000000000000000..47d35794faabeab300691173ae1e4da67ac01c84
+#--- /dev/null
+# b/run_allocation.py
+#@@ -0,0+1,108 @@
+#"""CLI for loading allocation data and writing stakeholder outputs.
 
+#his script keeps data ingestion and result export separate from the README so
+#you can run the optimizer directly from Excel tables.
+#"""
 from __future__ import annotations
 
 import argparse
@@ -10,23 +20,35 @@ import pandas as pd
 
 from allocation_model import allocation_data_from_tables, build_allocation_model
 
+REPO_ROOT = Path(__file__).resolve().parent
+DEFAULT_DATA_DIR = REPO_ROOT / "data"
+
 
 def _read_table(path: Path, *, required: bool = True) -> Optional[pd.DataFrame]:
     if path.exists():
         return pd.read_excel(path)
     if required:
-        raise FileNotFoundError(f"Missing required input table: {path}")
+        raise FileNotFoundError(
+            f"Missing required input table: {path}. Place Excel files under the repository data directory (default: {DEFAULT_DATA_DIR})."
+        )
     return None
 
 
 def run(data_dir: Path, output_prefix: Path, use_solution_pool: bool) -> None:
-    doors = _read_table(data_dir / r"C:\Users\popovyeh\OneDrive - adidas\Documents\hype_allocation\hype_allocation\doors.xlsx")
-    articles = _read_table(data_dir / r"C:\Users\popovyeh\OneDrive - adidas\Documents\hype_allocation\hype_allocation\articles.xlsx")
-    eligibility = _read_table(data_dir / r"C:\Users\popovyeh\OneDrive - adidas\Documents\hype_allocation\hype_allocation\eligibility.xlsx")
-    supply = _read_table(data_dir / r"C:\Users\popovyeh\OneDrive - adidas\Documents\hype_allocation\hype_allocation\supply.xlsx")
-    heat = _read_table(data_dir / r"C:\Users\popovyeh\OneDrive - adidas\Documents\hype_allocation\hype_allocation\heat.xlsx")
-    tier_cap_runs = _read_table(data_dir / r"C:\Users\popovyeh\OneDrive - adidas\Documents\hype_allocation\hype_allocation\tier_cap_runs.xlsx")
-    tier_capacity = _read_table(data_dir / r"C:\Users\popovyeh\OneDrive - adidas\Documents\hype_allocation\hype_allocation\tier_capacity.xlsx")
+    if not data_dir.exists():
+        raise FileNotFoundError(
+            f"Data directory does not exist: {data_dir}. Place Excel inputs in the repository's data/ folder or point --data-dir to your tables."
+        )
+    if not data_dir.is_dir():
+        raise NotADirectoryError(f"{data_dir} is not a directory; provide a folder containing the Excel input tables.")
+
+    doors = _read_table(data_dir / "doors.xlsx")
+    articles = _read_table(data_dir / "articles.xlsx")
+    eligibility = _read_table(data_dir / "eligibility.xlsx")
+    supply = _read_table(data_dir / "supply.xlsx")
+    heat = _read_table(data_dir / "heat.xlsx")
+    tier_cap_runs = _read_table(data_dir / "tier_cap_runs.xlsx")
+    tier_capacity = _read_table(data_dir / "tier_capacity.xlsx")
 
     data = allocation_data_from_tables(
         doors=doors,
@@ -62,8 +84,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path("data"),
-        help="Directory containing CSV inputs (doors, articles, eligibility, supply, heat, tier_cap_runs, tier_capacity).",
+        default=DEFAULT_DATA_DIR,
+        help=(
+            "Directory containing Excel inputs (doors, articles, eligibility, supply, heat, tier_cap_runs, tier_capacity). "
+            "Defaults to the repository's bundled data directory."
+        ),
     )
     parser.add_argument(
         "--output-prefix",
@@ -77,7 +102,6 @@ def parse_args() -> argparse.Namespace:
         help="Enable Gurobi solution pool to capture alternative allocations.",
     )
     return parser.parse_args()
-
 
 
 def main() -> None:

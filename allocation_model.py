@@ -1,5 +1,24 @@
+#diff --git a/allocation_model.py b/allocation_model.py
+#new file mode 100644
+#index 0000000000000000000000000000000000000000..c085dca4c2b54ca1014587573892c56bcde84a82
+#--- /dev/null
+# b/allocation_model.py
+#@@ -0,0 1,295 @@
+#"""Gurobi MILP for drop allocation with full size-runs.
+#
+#This version follows the latest stakeholder specification, which requires the
+#model to:
 
-
+#* use door tiers and SKU heat to look up both the objective score and the
+#  per-door/SKU ``max_runs`` cap,
+#* enforce supply at the SKU×size level using size-curve ratios,
+#* enforce an anti-concentration cap per door tier, and
+#* convert full runs to shipped units using the provided ``ratio`` per
+#  SKU×size in the exported allocation table.
+#The module maximizes the tier/heat score while respecting eligibility, supply,
+#and tier capacity constraints, then emits a stakeholder-friendly table of runs
+#and units.
+#"""
 from __future__ import annotations
 
 from dataclasses import dataclass
