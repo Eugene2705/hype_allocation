@@ -40,6 +40,20 @@ def run(data_dir: Path, output_prefix: Path, use_solution_pool: bool) -> None:
         heat=heat,
         tier_cap_runs=tier_cap_runs,
         tier_capacity=tier_capacity,
+    score = _read_table(data_dir / "score.csv")
+    eligibility = _read_table(data_dir / "eligibility.csv")
+    supply = _read_table(data_dir / "supply.csv")
+    cap_runs = _read_table(data_dir / "cap_runs.csv")
+    heat = _read_table(data_dir / "heat.csv")
+    min_runs = _read_table(data_dir / "min_runs.csv", required=False)
+
+    data = allocation_data_from_tables(
+        score=score,
+        eligibility=eligibility,
+        supply=supply,
+        cap_runs=cap_runs,
+        heat=heat,
+        min_runs=min_runs,
     )
 
     allocation = build_allocation_model(data)
@@ -68,6 +82,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("data"),
         help="Directory containing CSV inputs (doors, articles, eligibility, supply, heat, tier_cap_runs, tier_capacity).",
+        help="Directory containing CSV inputs (score, eligibility, supply, cap_runs, heat, optional min_runs).",
     )
     parser.add_argument(
         "--output-prefix",
