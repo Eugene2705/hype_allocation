@@ -1,19 +1,5 @@
-"""Gurobi MILP for drop allocation with full size-runs.
 
-This version follows the latest stakeholder specification, which requires the
-model to:
 
-* use door tiers and SKU heat to look up both the objective score and the
-  per-door/SKU ``max_runs`` cap,
-* enforce supply at the SKU×size level using size-curve ratios,
-* enforce an anti-concentration cap per door tier, and
-* convert full runs to shipped units using the provided ``ratio`` per
-  SKU×size in the exported allocation table.
-
-The module maximizes the tier/heat score while respecting eligibility, supply,
-and tier capacity constraints, then emits a stakeholder-friendly table of runs
-and units.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -152,7 +138,7 @@ def build_allocation_model(data: AllocationData, model_name: str = "full_run_all
     * Decision variables ``runs[d, s]``: integer full runs of SKU ``s`` to door ``d``.
     * Objective: maximize ``sum runs[d, s] * Score[tier(d), heat(s)]``.
     * Constraints:
-        1. Eligibility + cap: ``runs[d, s] <= Eligible[d, s] * MaxRuns[tier(d), heat(s)]``.
+        1. Eligibility  cap: ``runs[d, s] <= Eligible[d, s] * MaxRuns[tier(d), heat(s)]``.
         2. Supply: ``sum_d ratio[s, z] * runs[d, s] <= Supply[s, z]`` for each SKU×size.
         3. Anti-concentration: ``sum_s runs[d, s] <= CapRunsTotal[tier(d)]``.
         4. Integrality and non-negativity: runs are integer full runs.
