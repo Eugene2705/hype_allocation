@@ -1,18 +1,3 @@
-"""Gurobi MILP for drop allocation with full size-runs.
-
-This version follows the latest stakeholder specification, which requires the
-model to:
-
-* use door tiers and SKU heat to look up both the objective score and the
-  per-door/SKU ``max_runs`` cap,
-* enforce supply at the SKU×size level using size-curve ratios,
-* enforce an anti-concentration cap per door tier, and
-* convert full runs to shipped units using the provided ``ratio`` per
-  SKU×size in the exported allocation table.
-
-The module maximizes the tier/heat score while respecting eligibility, supply,
-and tier capacity constraints, then emits a stakeholder-friendly table of runs
-and units.
 """Gurobi model for full-run drop allocation (SKU x Size).
 
 This module builds a MILP that assigns SKU runs to store doors using the
@@ -46,15 +31,6 @@ class AllocationData:
         doors: Unique door identifiers (store IDs).
         sizes: Available sizes (e.g., numeric or "S/M/L").
         skus: SKU identifiers being allocated.
-        door_tier: Mapping from door to its tier ``tier(d)``.
-        sku_sizes: Mapping from SKU to the list of sizes in its fixed run curve.
-        eligible: Eligibility flag ``Eligible[d, s]`` (1 if door can receive SKU).
-        heat: Heat mapping ``heat(s)`` for each SKU.
-        score: Score lookup ``Score[tier(d), heat(s)]``.
-        max_runs: Max full runs ``MaxRuns[tier(d), heat(s)]`` per door/SKU.
-        supply_units: Size-level unit supply ``Supply[s, z]`` per SKU×size.
-        ratio: Units-per-run ratio ``ratio[s, z]`` used for output units and supply.
-        cap_runs_total: Anti-concentration cap per tier ``CapRunsTotal[tier]``.
         sku_size: Mapping from SKU to its single size ``z(s)``.
         score: Score matrix ``Score[d, z]`` (Tier x Heat). Higher is better.
         eligible: Eligibility flag ``Eligible[d, s]`` (1 if door can receive SKU).
@@ -68,15 +44,6 @@ class AllocationData:
     doors: Sequence[Door]
     sizes: Sequence[Size]
     skus: Sequence[SKU]
-    door_tier: Mapping[Door, str]
-    sku_sizes: Mapping[SKU, Sequence[Size]]
-    eligible: Mapping[Tuple[Door, SKU], int]
-    heat: Mapping[SKU, str]
-    score: Mapping[Tuple[str, str], float]
-    max_runs: Mapping[Tuple[str, str], int]
-    supply_units: Mapping[Tuple[SKU, Size], int]
-    ratio: Mapping[Tuple[SKU, Size], float]
-    cap_runs_total: Mapping[str, float]
     sku_size: Mapping[SKU, Size]
     score: Mapping[Tuple[Door, Size], float]
     eligible: Mapping[Tuple[Door, SKU], int]
@@ -118,35 +85,11 @@ class AllocationModel:
             raise ValueError("Model has no solution to summarize.")
 
         rows: List[Dict[str, object]] = []
-        units_by_door_size: Dict[Tuple[Door, Size], float] = {}
-
         for door in self.data.doors:
             for sku in self.data.skus:
                 value = self.runs[door, sku].X
                 if value <= tolerance:
                     continue
-                heat = self.data.heat[sku]
-                tier = self.data.door_tier[door]
-                score = self.data.score[(tier, heat)]
-                for size in self.data.sku_sizes[sku]:
-                    ratio = self.data.ratio[(sku, size)]
-                    units = ratio * value
-                    units_by_door_size[(door, size)] = units_by_door_size.get((door, size), 0.0) + units
-                    rows.append(
-                        {
-                            "door": door,
-                            "sku": sku,
-                            "size": size,
-                            "runs": value,
-                            "ratio": ratio,
-                            "units": units,
-                            "score": score,
-                            "heat": heat,
-                        }
-                    )
-
-        for row in rows:
-            row["door_size_units"] = units_by_door_size[(row["door"], row["size"])]
                 size = self.data.size_for(sku)
                 supply = self.data.supply.get((sku, size), 0)
                 ratio = value / supply if supply else 0.0
@@ -187,17 +130,6 @@ class AllocationModel:
             )
         return rows
 
-def build_allocation_model(data: AllocationData, model_name: str = "full_run_allocation") -> AllocationModel:
-    """Construct the MILP defined in the tier/heat specification.
-
-    Components:
-    * Decision variables ``runs[d, s]``: integer full runs of SKU ``s`` to door ``d``.
-    * Objective: maximize ``sum runs[d, s] * Score[tier(d), heat(s)]``.
-    * Constraints:
-        1. Eligibility + cap: ``runs[d, s] <= Eligible[d, s] * MaxRuns[tier(d), heat(s)]``.
-        2. Supply: ``sum_d ratio[s, z] * runs[d, s] <= Supply[s, z]`` for each SKU×size.
-        3. Anti-concentration: ``sum_s runs[d, s] <= CapRunsTotal[tier(d)]``.
-        4. Integrality and non-negativity: runs are integer full runs.
 
 def _min_runs(data: AllocationData, door: Door, sku: SKU) -> int:
     if data.min_runs is None:
@@ -232,8 +164,6 @@ def build_allocation_model(data: AllocationData, model_name: str = "full_run_all
     # Objective
     model.setObjective(
         gp.quicksum(
-            runs[door, sku]
-            * data.score[(data.door_tier[door], data.heat[sku])]
             runs[door, sku] * data.score.get((door, data.size_for(sku)), 0.0)
             for door in data.doors
             for sku in data.skus
@@ -244,22 +174,12 @@ def build_allocation_model(data: AllocationData, model_name: str = "full_run_all
     # Eligibility and per-door per-SKU cap
     for door in data.doors:
         for sku in data.skus:
-            tier = data.door_tier[door]
-            heat = data.heat[sku]
-            cap = data.eligible.get((door, sku), 0) * data.max_runs[(tier, heat)]
             size = data.size_for(sku)
             cap = data.eligible.get((door, sku), 0) * data.max_runs.get((sku, size), 0)
             model.addConstr(
                 runs[door, sku] <= cap,
                 name=f"eligibility[{door},{sku}]",
             )
-
-    # Supply feasibility per SKU×size using fixed ratios
-    for (sku, size), supply in data.supply_units.items():
-        ratio = data.ratio[(sku, size)]
-        model.addConstr(
-            gp.quicksum(ratio * runs[door, sku] for door in data.doors) <= supply,
-            name=f"supply[{sku},{size}]",
             min_bound = _min_runs(data, door, sku)
             if min_bound:
                 model.addConstr(
@@ -278,11 +198,6 @@ def build_allocation_model(data: AllocationData, model_name: str = "full_run_all
 
     # Anti-concentration per door/size
     for door in data.doors:
-        model.addConstr(
-            gp.quicksum(runs[door, sku] for sku in data.skus)
-            <= data.cap_runs_total.get(data.door_tier[door], GRB.INFINITY),
-            name=f"cap_runs_total[{door}]",
-        )
         for size in data.sizes:
             model.addConstr(
                 gp.quicksum(
@@ -299,25 +214,6 @@ def build_allocation_model(data: AllocationData, model_name: str = "full_run_all
 
 
 def allocation_data_from_tables(
-    doors: "pd.DataFrame",
-    articles: "pd.DataFrame",
-    eligibility: "pd.DataFrame",
-    supply: "pd.DataFrame",
-    heat: "pd.DataFrame | Mapping[SKU, float]",
-    tier_cap_runs: "pd.DataFrame",
-    tier_capacity: "pd.DataFrame",
-) -> AllocationData:
-    """Build :class:`AllocationData` from tabular inputs (CSV/Excel).
-
-    Expected shapes (column names must match):
-
-    * ``doors``: ``door``, ``tier``
-    * ``articles``: ``sku``, ``size``
-    * ``eligibility``: ``door``, ``sku``, ``eligible`` (0/1)
-    * ``supply``: ``sku``, ``size``, ``supply_units``, ``ratio``
-    * ``heat``: ``sku``, ``heat`` (mapping accepted)
-    * ``tier_cap_runs``: ``tier``, ``heat``, ``max_runs``, ``score``
-    * ``tier_capacity``: ``tier``, ``cap_runs_total``
     score: "pd.DataFrame",
     eligibility: "pd.DataFrame",
     supply: "pd.DataFrame",
@@ -347,61 +243,6 @@ def allocation_data_from_tables(
     def _series_to_mapping(df: pd.DataFrame, key_cols: List[str], value_col: str):
         return {tuple(row[k] for k in key_cols): row[value_col] for row in df.to_dict("records")}
 
-    doors_list = sorted(doors["door"].unique())
-    skus = sorted(articles["sku"].unique())
-    sizes = sorted(articles["size"].unique())
-
-    sku_sizes: Dict[SKU, List[Size]] = {}
-    for row in articles.to_dict("records"):
-        sku_sizes.setdefault(row["sku"], []).append(row["size"])
-    sku_sizes = {sku: sorted(set(sizes_for_sku)) for sku, sizes_for_sku in sku_sizes.items()}
-
-    door_tier_map = doors.set_index("door")["tier"].to_dict()
-    eligible_map = _series_to_mapping(eligibility, ["door", "sku"], "eligible")
-    supply_units_map = _series_to_mapping(supply, ["sku", "size"], "supply_units")
-    ratio_map = _series_to_mapping(supply, ["sku", "size"], "ratio")
-    if isinstance(heat, Mapping):
-        heat_map = {sku: str(value) for sku, value in heat.items()}
-    else:
-        heat_map = heat.set_index("sku")["heat"].astype(str).to_dict()
-    max_runs_map = _series_to_mapping(tier_cap_runs, ["tier", "heat"], "max_runs")
-    score_map = _series_to_mapping(tier_cap_runs, ["tier", "heat"], "score")
-    cap_runs_total_map = tier_capacity.set_index("tier")["cap_runs_total"].to_dict()
-
-    missing_heat = set(skus) - set(heat_map)
-    if missing_heat:
-        raise ValueError(f"Missing heat entries for SKUs: {sorted(missing_heat)}")
-
-    expected_size_keys = {(sku, size) for sku, sizes_for_sku in sku_sizes.items() for size in sizes_for_sku}
-    missing_supply = expected_size_keys - set(supply_units_map)
-    if missing_supply:
-        raise ValueError(f"Missing supply entries for SKU×size pairs: {sorted(missing_supply)}")
-
-    tiers = set(door_tier_map.values())
-    required_pairs = {(tier, heat_map[sku]) for sku in skus for tier in tiers}
-    missing_score = required_pairs - set(score_map)
-    missing_max_runs = required_pairs - set(max_runs_map)
-    if missing_score:
-        raise ValueError(f"Missing score entries for tier/heat pairs: {sorted(missing_score)}")
-    if missing_max_runs:
-        raise ValueError(f"Missing max_runs entries for tier/heat pairs: {sorted(missing_max_runs)}")
-
-    if set(supply_units_map) != set(ratio_map):
-        raise ValueError("Supply and ratio tables must share identical (sku, size) keys.")
-
-    return AllocationData(
-        doors=doors_list,
-        sizes=sizes,
-        skus=skus,
-        door_tier=door_tier_map,
-        sku_sizes=sku_sizes,
-        eligible=eligible_map,
-        heat=heat_map,
-        score=score_map,
-        max_runs=max_runs_map,
-        supply_units=supply_units_map,
-        ratio=ratio_map,
-        cap_runs_total=cap_runs_total_map,
     doors = sorted(eligibility["door"].unique())
     skus = sorted(eligibility["sku"].unique())
     sizes = sorted(score["size"].unique())
